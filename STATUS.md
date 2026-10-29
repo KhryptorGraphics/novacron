@@ -20,6 +20,182 @@ which overstate completion and should not be trusted.
 - Research artifacts (profitability analysis, market research, etc.) live in
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
+## Production-readiness pass — 2026-10-29 (criteria 1–4 code-complete; live harness deferred)
+
+All changes below are committed in `4acbf8f2` and `0bedfdfc`. **[read]** = verified by reading code/tests this session; **[ran]** = test executed locally; **[deferred]** = requires infrastructure not available on this host.
+
+- **Criterion 1: Tenant Isolation (novacron-ok7)** — [ran] `TestOrgScopeTwoOrgCreateReadDeleteRoundTrip` added to `fabric_org_scope_test.go`: creates a VM as org A, reads it back with org A stamp, confirms org B gets 404 on read and delete, and deletes successfully as org A. `createVMLocal` stamps `organization_id` via scalar subquery against the local `organizations` table (cluster.go:381-384); `requireOrgScope` enforces 404-hides-existence on all VM routes. Real-postgres variant (`TestOrgStampRealPostgresTwoOrgRoundTrip`) added to `cluster_identity_test.go` but skips on hosts without reachable postgres.
+- **Criterion 2: Work Unit Executor Isolation** — [ran] Advisor 4 bypass closed: `POST /api/compute/jobs` now gated by `workUnitAdmin` (fabric_jobs.go:83-86), matching the existing gate on `/compute/work-units`. `TestFabricJobSubmissionRejectsNonAdmin` proves viewer/user/unauthenticated requests return 403. `TestWorkUnitArtifactUploadIsContentAddressedAndAdminOnly` already proved artifact upload rejection. CLI (`cli/pkg/service/fabric.go:40`), SDK (`sdk/typescript/src/fabric.ts:281`), and frontend (`frontend/src/lib/api/fabric.ts:165`) all call the same endpoint, so the gate applies uniformly.
+- **Criterion 3: p2pnet T14 Throughput (novacron-j3d)** — [ran] Fixes committed in `0bedfdfc`: `iperf3-serve.sh` binds one listener per overlay address (dual-WAN MPTCP subflow no longer blocked); `health.sh` reports guest CPU steal during iperf window; `mptcp.sh` matches `subflows_max` correctly. Root cause was host CPU contention (steal 19–20%), not a threshold-math bug. Live lab re-run deferred: no `/dev/kvm` on this arm64 host.
+- **Criterion 4: Billing Wiring Complete** — [read] Rate card env vars (`NOVACRON_RATE_PER_*`) injected into harness `start_node` (two-node-fabric-test.sh:307-310). Billing assertion integrated into pre-promotion assertion 5 (lines 540-565): validates `rate_card.usd_per_gb_egress > 0` and `totals.estimated_cost_usd > 0` using the viewer-scoped token before admin promotion. Unit tests `TestComputeUsageTotalsPricing`, `TestLoadUsageRatesRejectsGarbage`, `TestComputeUsageTotalsZeroRates` pass. Live harness run deferred: no `/dev/kvm`; postgres-test container starts but harness requires KVM for VM lifecycle assertions.
+- **Criteria 5–8**: require CI runners (x86_64 + arm64), multi-node cluster, or frontend build environment not available in this session. Deferred to next session with appropriate infrastructure.
+## Fix pass — 2026-10-25 (arch gate, MADDPG repair, p2pnet lab defects)
+
+All changes below are UNCOMMITTED in the working tree when written. **[ran]** = run in this pass.
+
+- **Migration arch preflight** — `backend/cmd/api-server/migration_arch_gate.go` refuses
+  cross-architecture migration (aarch64 ↔ x86_64; amd64/arm64 aliases normalized) with HTTP 422
+  `{"code":"migration_arch_mismatch", source_arch, target_arch, …}` on the sync route, async jobs,
+  `POST /transfers`, and drain/healing queueing; drain/healing candidate selection skips known-foreign
+  peers. Peers that do not report arch are allowed with a `warnings` entry (admission-time check only;
+  `core/orchestration/adapters.go` `MigrateAdapter` bypasses it and is not wired in `cmd/`).
+  [ran] `go vet` clean; the targeted new tests pass under `-race`. [reported by the implementing
+  agent] the full api-server package passes `-race`, and 9 of 10 new tests fail with the gate
+  disabled. Not exercised on a real two-arch pair.
+- **MADDPG (`backend/ml/maddpg/`)** — commit `7cc31a73` (2026-07-08) had replaced `train.py` with a
+  546-byte self-importing stub (so `train`/`inference`/`benchmark`/tests could not import).
+  Restored `train.py` and `benchmark.py` from `3e1fb725`. Fixed `OUNoise.sample` aliasing its state
+  array; `environment.py`: `_initialize_nodes` appended on every `reset()` (nodes doubled), processed
+  workloads were never removed from the queue (re-allocated/re-rewarded every step), `reset(seed=)` did
+  not seed the RNG the env uses, and `info` lacked `sla_violations`. [ran] `test_maddpg.py` +
+  `test_environment.py`: 40 passed (was 30 passed / 10 failed at the restored `train.py`).
+  `PERFORMANCE_REPORT.md` now carries an UNVERIFIED banner; its figures were never reproducible.
+- **p2pnet lab / T14 (`novacron-j3d`)** — the low throughput was host CPU contention (steal 19–20%,
+  host load 11–20), not a regression; see the bead notes. Real defects fixed: stdin-eating `ssh`/`sftp`/
+  `virsh` loops (`lab.sh`, `sshd.sh`, `swarm.sh`, `libvirt.sh`) meant T14 and `sshd verify` only ever
+  checked the first node/peer; the iperf3 listener bound a single overlay address, blocking the plane-2
+  MPTCP subflow when a dual-WAN peer was the server (new `libexec/iperf3-serve.sh`, one `-B` listener
+  per overlay address, no wider exposure); `_mptcp_peer_verify` `ss` pattern; two T10 flake causes;
+  `health.sh` reports guest CPU steal on a throughput FAIL. [reported by the lab run, host load 7–12]
+  `lab.sh test` T1–T16 PASS, `p2pnet health` rc=0 on all three nodes. [ran] CI-equivalent
+  `shellcheck -x` rc=0, python tests 16 passed, bats tests passed. `lab.sh up` still aborts when the
+  cached Ubuntu image no longer matches upstream SHA256SUMS (separate small fix).
+- **Hygiene** — untracked the 19.9 MB `backend/cmd/api-server/api-server` binary and ignored it; 35 stale
+  root files moved to `docs/archive/root-cruft/`; 15 stale `.claude/worktrees/agent-*` stub dirs removed.
+- **Open, needs the owner** — rotate the Cognitum key: `.omp/secrets.yml` was committed and pushed in
+  `bf3837d6`, and GitHub still serves that commit by SHA (repo is public) although it is unreachable from
+  `main`; only rotation fixes it.
+
+## Prod-readiness landing, p2pnet toolkit and fabric work units — 2026-09-23 → 2026-10-23
+
+About 112 commits. Tags: **[read]** = the session writing this (2026-10-24) read the code,
+tests or scripts in this repo; **[reported]** = a commit message, bead close reason or session
+note says so and it was NOT re-run here. No test was run for this section. Probe, work-unit,
+cache and isolation mechanics are in "Fabric session — 2026-09-20" below and not repeated.
+
+### Tenant isolation, sessions, 2FA (09-23 → 09-27)
+
+- **Org scoping** — [read] `requireOrgScope` (`backend/cmd/api-server/main.go`): admin is
+  unscoped; everyone else is scoped to the `organization_id` claim; a legacy/non-uuid label
+  sees only NULL-org rows; a failed probe fails closed (404). Migrations `000014` (fabric_jobs)
+  and `000015` (migration_jobs) persist the org so status outlives the source VM row. Tests
+  exist (`*_org_scope_test.go`, `vm_org_scope_routes_test.go`).
+- **Session revocation** — [read] `ba18f257` (09-24): tokens older than the user's `updated_at`
+  are rejected. `e9641017` (09-27, migration `000017`): `sid` claim, rotating opaque refresh
+  tokens stored as sha256 (one prior generation kept to detect reuse), logout revocation.
+  `authenticateToken` (`auth_session.go`) checks `users.updated_at`, `users.status` and an
+  unrevoked, unexpired `sessions` row in one query; lookup failure → 503.
+- **2FA persistence** — [read] migration `000016` creates `user_two_factor` (secret, enabled,
+  backup_codes, algorithm/digits/period); `TestTwoFactorServiceRecoversEnrollmentAfterRestart`
+  exists. [reported] `34770354` also gates login on active status. At-rest protection of the
+  secret was not traced.
+
+### Production-readiness remediation (09-23 → 09-28) — [reported] unless tagged
+
+- Security/honesty: SSRF in `resolveBootImage` closed (`559b8e6a`); X-Forwarded-For trusted only
+  from configured proxies (`d5db0e12`); healing needs a measured health source (`9bedfb3e`);
+  recovery strategies say "not implemented" instead of faking success (`dea60cb1`,
+  `0ab2b59e`); autoscaling publishes only measured metrics (`81f50b2c`); admin handlers stop
+  fabricating success (`55f29033`); real backup replication replaces a sleep stub (`199c63fb`).
+- Wiring: orchestration API mounted (`c1b5b037`); event bus + VM healing (`e9641017`); KVM
+  network catalog (`37ffaa63`, migration `000018`); deploy configs aligned to the single-port
+  api-server (`97f7b74d`, `d649d89b`). [read] `requiredSchemaVersion` = 19.
+- Dead code (`git show --shortstat` COMMIT totals, mixed with other work): `e9641017` 177 files
+  +6,422/−45,803; `cdbb5b88` (fictional-API suites) −16,706; `4fa2ec79` (unreachable VM
+  lifecycle/backup/health helpers) −11,315; `37ac388e` −7,601; `283ff07d` −2,789.
+- Core races: `4eef2f2c` joins federation/DWCP workers on shutdown, serializes persistence
+  (message: "verified by the complete backend/core race suite"); `ca5efb2a` locks the auth
+  stores (map-write crash); `77453029` autoscaling targets.
+- Migration port range — [read] `fb101f6e`, `backend/core/vm/migration_ports.go`:
+  `NOVACRON_MIGRATION_PORT_RANGE="LO-HI"`, default 49152-49215, for QEMU incoming and NBD
+  listeners so host QoS can match one port block; 5 tests exist.
+
+### deploy/p2pnet toolkit (`a044959a`, 09-27, follow-ups to 10-23)
+
+- What it is — [read]: operator tooling in `deploy/p2pnet/`, not part of the api-server:
+  `bin/p2pnet`, `install.sh`, `libexec/*.sh` components (WireGuard mesh, VXLAN L2, BBR/fq tuning
+  + iperf3 bench, dual-WAN MPTCP, tc-HTB QoS, restricted overlay SSH, swarm image distribution,
+  restic dedup, resumable ZFS replication via zrepl, libvirt migration planning, placement,
+  off-peak timers, health), 11 systemd units, `lab/`, `tests/{bats,python}`. Coupling to
+  NovaCron is env-only (`NOVACRON_MIGRATION_PORT_RANGE`, `NOVACRON_PEERS`,
+  `NOVACRON_JOIN_ADDR`). CI (`p2pnet-toolkit`): shellcheck + unittest + bats; the 3-VM lab is
+  manual, NOT in CI.
+- Running the lab — [read] `deploy/p2pnet/lab/lab.sh up | provision | test [T3 T9 …] | down
+  [--purge]`: three QEMU/KVM Ubuntu cloud-image VMs; needs `/dev/kvm`, `qemu-img`,
+  `cloud-localds`, `ssh`, `rsync`, `curl`, `sha256sum`, an image mirror; no host root; state in
+  `~/.cache/p2pnet-lab`. T1 inventory, T2 WireGuard, T3 VXLAN/L2, T4 tuning, T5 overlay bench,
+  T6 dual-WAN MPTCP, T7 restricted SSH, T8 HTB classes, T9 libvirt migration + QoS, T10 ZFS
+  replication, T11 swarm, T12 dedup, T13 placement, T14 off-peak timers + full health, T15
+  uninstall/reinstall, T16 idempotency. Suite order matters (T9 must not reinstall components).
+- Results — [reported] `a044959a`: "3-VM lab T1-T16 PASS". Later fixes each say they were
+  measured on the lab: guest MTU (guest NIC stays 1500 until libvirt's `<mtu>` is set,
+  `22848005`, `7fce43f5`), a zrepl timer that never armed (`7fce43f5`), Ubuntu `mptcp.service`
+  breaking the MPTCP limits (`f8aa6bb0`; bead `novacron-xwt` closed).
+- **Known failure** — bead `novacron-j3d` (open, P2): T14 misses its inventory-derived overlay
+  throughput target (165 Mbit/s = 95% of the 173 Mbit ceiling); node2/node3 measured 88/79
+  Mbit/s with an external poller, 178/86 without [reported by the bead]. [read] `4eab02f6` +
+  triage: threshold math is correct and unchanged, health now names both ends ("path A->B");
+  the cause needs per-node CPU/HTB/netem evidence. "T1–T16 all pass" is therefore NOT
+  currently established. The lab was not run here.
+
+### Fabric: directional estimates and checkpointed work units (`b35a3520` → `8b005255`, 10-23)
+
+Mechanics are in "Fabric session — 2026-09-20" below. New in this window:
+
+- Body cap — [read] `binaryUploadPath` (`middleware.go`) exempts the throughput probe and
+  work-unit artifact routes from the 1 MiB JSON cap; [reported] `cd0afd8b` found it by running
+  the harness (a 2 MiB probe was truncated and answered 400).
+- Bounce-back — [read] `prepareIncomingMigrationDir` (`main.go:341`): create if absent; 409 on
+  an in-flight marker; 409 if the driver says the VM runs here (`incomingVMIsLive` — driver
+  truth, not the `vms` row); else replace the stale directory a migrated-away VM left.
+  [reported] bead `novacron-7jg`: failed identically at `4f1e2847`, so it predates this work.
+- StartVM — [read] `VMManager.startVM` (`vm_operations.go:325`) confirms a cached
+  `StateRunning` with `driver.GetStatus`; non-running or unreadable drops the cache and really
+  starts (`eb2375e3`). checkpoint_state — [reported] `c7250719` asks the node that owns the
+  checkpoint, not a local `stat` of another node's path.
+- **Resolved 2026-10-25 (by reading code; not runtime-verified)**: `eb2375e3`, the comment at
+  `vm_operations.go:327` and the 2026-09-20 Fabric section call the VM manager's maintenance loop
+  "inert". That was true on 2026-09-20 (placeholder loop, never-seeded `vmCache`). Today
+  `VMManager.Start()` (`vm_manager.go:219`) launches `updateLoop` → `syncVMStates` and
+  `cleanupLoop`, and `backend/cmd/api-server/main.go:123` calls `vmManager.Start()`. So the loop
+  is live in the api-server; the driver-confirm fix in `StartVM` stays correct either way, since
+  the cache can lag the driver between sync ticks.
+
+### Two-node acceptance harness (`scripts/fabric/two-node-fabric-test.sh`)
+
+- Asserts — [read, script header]: (1) both nodes visible with a live link profile; (2) a job
+  dispatched to the peer completes, stdout comes back; (3) a second transfer on a busy link is
+  QUEUED with an ETA; (4) a cross-node migration leaves the VM owned by the target; (5) billing
+  usage reflects measured migration egress; (5b) work units: a >1 MiB input is staged to the
+  peer, attempt 1 fails with a checkpoint, the retry resumes it; (6) the SAME VM migrates back
+  B→A over A's stale destination; (7) SIGKILL of node A mid-migration + restart: the job row
+  reads "interrupted" (never "running"), exactly one node owns the guest.
+- Setup — [read]: two real api-server processes on ONE host (separate Postgres DBs, storage,
+  ports), node B in a netns behind a veth, tc shaping (netem rate+delay if available, else tbf
+  rate only); a missing prerequisite is a SKIP, never a silent pass. CI job "Fabric Two-Node
+  Acceptance" runs it with `FABRIC_REQUIRE_ALL=1`. Reported runs: `ca5cd1b7` "14/14 PASS 0
+  SKIP" (before 5b existed); bead `novacron-nu5i` "PASS (16 pass / 0 fail / 1 skip)" after 5b
+  (skipped assertion and commit not recorded); bead `novacron-7jg`: assertion 6 passes.
+- NOT covered — [read, grep of the script]: node drain; the compression/zstd decision; PCI
+  passthrough; org/tenant isolation (Go unit tests only); work-unit cancel (Go test
+  `ef2221a1`); the p2pnet overlay; more than two nodes or one host; real WAN delay where
+  `sch_netem` is absent (this host, 6.8.12-tegra: tbf only, `novacron-yxm`); executor isolation.
+
+### Stated limits (unchanged by this window)
+
+- **Executor isolation is a documented non-goal** — see "Fabric session — 2026-09-20": work
+  units run admin-submitted native commands as the api-server's account; the investigation and
+  the acceptance test to write first are recorded there.
+- **DWCP epics were closed administratively; there was no formal Go/No-Go.** `novacron-38p`
+  ("not code-addressable in this session") and `novacron-ahm` ("umbrella tracker, not an
+  actionable issue") are closed; 38p's notes call the Go/No-Go "NOT YET CALLABLE" and the
+  92% / 28x / 3.3x targets were fabricated (`novacron-2vo`).
+- **ML models (MADDPG, neural training, ProBFT) were validated on synthetic data only** (project
+  owner's statement). [read] support: `backend/ml/models/*.py` generate synthetic training data
+  and `AGENT_REPORT.md` says "on synthetic data"; `backend/ml/maddpg/environment.py` is a
+  simulated env. `maddpg/train.py` imports `MADDPGTrainer` from itself and no such class exists
+  in the repo, so MADDPG training cannot run as committed. `probft.go` was not examined.
+- Root cleanup (2026-10-24): 35 stale root files moved to `docs/archive/root-cruft/` (see its README).
 
 ## Feature-gap closure swarm — 2026-09-22 (PCI passthrough, crash restarts, drain, tenancy)
 
