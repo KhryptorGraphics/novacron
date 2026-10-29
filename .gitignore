@@ -145,3 +145,6 @@ deploy/p2pnet/agentdb.rvf.idmap.json
 
 # Local tooling lockfiles
 .claude/.headroom_wrap_settings.lock
+
+# Generated Spec Kit scaffold (per-checkout init output, not repo source)
+novacron/
