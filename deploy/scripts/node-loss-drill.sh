@@ -58,8 +58,9 @@ done
 
 [ -x "$HARNESS" ] || { printf 'ERROR: harness not found or not executable: %s\n' "$HARNESS" >&2; exit 2; }
 
-# FABRIC_DRILL=1 turns the drill section on; FABRIC_KEEP=1 leaves the fabric up
-# afterwards so the operator can inspect what the drill left behind.
+# FABRIC_DRILL=1 turns the drill section on; FABRIC_KEEP=1 leaves the netns,
+# veth pair, databases and logs up afterwards so the operator can inspect what
+# the drill left behind (the node processes are always stopped).
 export FABRIC_DRILL=1
 [ "$KEEP" = "1" ] && export FABRIC_KEEP=1
 
